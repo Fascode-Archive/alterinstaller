@@ -1,0 +1,228 @@
+#!/usr/bin/env bash
+
+set -eu
+
+msgdebug=false
+nocolor=false
+bash_debug=false
+debug=false
+
+install_config=()
+
+
+######################################################################################
+# _msg_common [-n] <label color> <label> <str1> <str2> ...
+_msg_common(){
+    [[ "${msgdebug}" = true  ]] && set -xv
+    [[ "${msgdebug}" = false ]] && set +xv
+    local _msg_opts=("-e") _count _message _label
+    _label="$(_colored_text -nc "${1}" "${2}")" && shift 2
+    [[ "${1}" = "-n" ]] && _msg_opts+=("-n") && shift 1
+    _message="$(_colored_text "${@}")"
+    for _count in $(seq "1" "$(echo -ne "${_message}\n" | wc -l)"); do
+        echo "${_msg_opts[@]}" "${_label} $(echo -e "${_message}" | head -n "${_count}" | tail -n 1 )"
+    done
+    [[ "${bash_debug}" = true  ]] && set -xv
+    [[ "${bash_debug}" = false ]] && set +xv
+    return 0
+}
+
+# Show an INFO message
+# $1: message string
+_msg_info() { _msg_common green "   Info" "${@}"; }
+
+# Show an Warning message
+# $1: message string
+_msg_warn() { _msg_common yellow "Warning" "${@}"; }
+
+# Show an debug message
+# $1: message string
+_msg_debug() { [[ "${debug}" = true ]] && _msg_common magenta "  Debug" "${@}"; return 0;}
+
+# Show an ERROR message then exit with status
+# $1: message string
+_msg_error() { _msg_common red "  Error" "${@}"; }
+
+# 使い方
+# text [-b/-c color/-n/-f/-l/]
+_colored_text() {
+    local OPTIND OPTARG arg _textcolor _decotypes="" _notranslate=false
+    while getopts "c:bnfl" arg; do
+        case "${arg}" in
+            c)
+                case "${OPTARG}" in
+                    "black"   ) _textcolor="30" ;;
+                    "red"     ) _textcolor="31" ;;
+                    "green"   ) _textcolor="32" ;;
+                    "yellow"  ) _textcolor="33" ;;
+                    "blue"    ) _textcolor="34" ;;
+                    "magenta" ) _textcolor="35" ;;
+                    "cyan"    ) _textcolor="36" ;;
+                    "white"   ) _textcolor="37" ;;
+                    *         ) return 1        ;;
+                esac
+                ;;
+            b) _decotypes="${_decotypes};1" ;;
+            f) _decotypes="${_decotypes};5" ;;
+            l) _decotypes="${_decotypes};4" ;;
+            n) _notranslate=true            ;;
+            *) : ;;
+        esac
+    done
+    shift "$((OPTIND - 1))"
+    if [[ "${nocolor}" = true ]]; then
+        echo -ne "${@}"
+    else
+        echo -ne "\e[$([[ -v _textcolor ]] && echo -n ";${_textcolor}"; [[ -v _decotypes ]] && echo -n "${_decotypes}")m${*}\e[m"
+    fi
+}
+
+# 質問を行う関数
+# Returns only the selected result to standard output
+# ask_question -n -d <デフォルト値> -p <質問文> <選択肢1> <選択肢2> ...
+# -n: Return with number
+ask_question(){
+    local arg OPTARG OPTIND _default="" _choice_list _count _choice _question _mark _number=false
+    while getopts "ad:p:n" arg; do
+        case "${arg}" in
+            d) _default="${OPTARG}" ;;
+            p) _question="${OPTARG}" ;;
+            n) _number=true ;;
+            *) exit 1 ;;
+        esac
+    done
+    shift "$((OPTIND - 1))" ; _choice_list=("${@}") _digit="${##}"
+    (( ${#_choice_list[@]} < 0 )) && echo "An exception error has occurred." >&2 && exit 1
+    (( ${#_choice_list[@]} <= 1 )) && {
+        [[ "${_number}" = true ]] && echo "1" || echo "${_choice_list[*]}" 
+    } && return 0
+    [[ -n "${_question-""}" ]] && echo -e "${_question}" >&2
+    for (( _count=1; _count<=${#_choice_list[@]}; _count++)); do
+        _choice="${_choice_list[$(( _count - 1 ))]}" _mark=" "
+        { [[ ! "${_default}" = "" ]] && [[ "${_choice}" = "${_default}" ]]; } && _mark="*"
+        printf " ${_mark} %${_digit}d: ${_choice}\n" "${_count}" >&2
+    done
+    echo -n "(1 ~ ${#_choice_list[@]}) > " >&2 && read -r _input
+    { [[ -z "${_input-""}" ]] && [[ -n "${_default-""}" ]]; } && {
+        [[ "${_number}" = true ]] && echo 0 || echo "${_default}"
+    } && return 0
+    { printf "%s" "${_input}" | grep -qE "^[0-9]+$";} && { (( 1 <= _input)) && (( _input <= ${#_choice_list[@]} )); } && {
+        [[ "${_number}" = true ]] && echo "$(( _input ))" || echo "${_choice_list[$(( _input - 1 ))]}" 
+    } && return 0
+    for (( i=0; i <= ${#_choice_list[@]} - 1 ;i++ )); do
+        [[ "${_choice_list["${i}"],,}" = "${_input,,}" ]] && {
+            [[ "${_number}" = true ]] && echo "$(( i + 1))" || echo "${_choice_list["${i}"]}" 
+        } && return 0
+    done
+    return 1
+}
+
+_add_config(){
+    install_config+=("${1}=${2}")
+}
+_get_config(){ 
+    printf "%s\n" "${install_config[@]}" | awk -F "=" "{if (\$1 == \"${1}\"){print \$2; exit}}"
+}
+
+######################################################################################
+
+_run(){
+    "${@}"
+    echo
+}
+
+_select_layout(){
+    local _layout_list _selected="jp106" _answer _ask
+    readarray -t _layout_list < <(localectl list-keymaps)
+
+    echo "== Configure keyboard map =="
+
+    _ask(){
+        _answer="$(ask_question -n -d "${_selected}" -p "Please select or enter layout from list" \
+            "Continue with current layout(${_selected})" "Show keymap list" "Enter keymap")"
+    
+        case "${_answer}" in
+            "1")
+                return 0
+                ;;
+            "2")
+                printf "%s\n" "${_layout_list[@]}" | less
+                ;;
+            "3")
+                read -r -p "(Layout) > " _answer
+                printf "%s\n" "${_layout_list[@]}" | grep -qx "${_answer}" && _selected="${_answer}"
+                ;;
+        esac
+        echo
+        _ask
+        return 0
+    }
+
+    _ask
+    _add_config "keyboard" "${_selected}"
+}
+
+_select_disk(){
+    echo "== Configure disk to install =="
+
+    local _disk_list _choices _disk _answer _selected
+    readarray -t _disk_list < <(lsblk -l -n -o TYPE,NAME | awk '{if ($1=="disk"){print "/dev/"$2}}')
+    for _disk in "${_disk_list[@]}"; do
+        _choices+=("${_disk} : $(lsblk "${_disk}" -l -n -o MODEL | grep -Evx "^$") $(lsblk "${_disk}" -l -n -o TYPE,NAME | awk '{if ($1=="part"){print "/dev/"$2}}' | wc -l) Partition")
+    done
+
+    _answer="$(ask_question -n -p "Please select the disk to install" "${_choices[@]}")"
+    _selected="${_disk_list[$(( _answer - 1 ))]}"
+    _add_config "disk" "${_selected}"
+}
+
+_edit_disk(){
+    case "$(ask_question -n -p "Do you want to edit partition?" "Yes" "No")" in
+        "1")
+            cfdisk "$(_get_config disk)"
+            ;;
+        "2")
+            echo "Make sure the partition is already configured for the new system"
+            return 0
+            ;;
+    esac
+}
+
+_select_part(){
+    echo "== Configure partition to install =="
+
+    local _part_list=() _disk _choices=()
+    _disk="$(_get_config disk)"
+    readarray -t _part_list < <(lsblk "${_disk}" -l -n -o TYPE,NAME | awk '{if ($1=="part"){print "/dev/"$2}}')
+    for _part in "${_part_list[@]}"; do
+        _choices+=("${_part} : $(lsblk -l -n -o SIZE "${_part}" | sed "s/ *//g")")
+    done
+    _answer="$(ask_question -n -p "Please select the partition to install" "${_choices[@]}")"
+    _selected="${_part_list[$(( _answer - 1 ))]}"
+    _add_config "part_main" "${_selected}"
+}
+
+_select_efi_part(){
+    echo "== Configure EFI partition to install =="
+
+    local _part_list=() _disk _choices=()
+    _disk="$(_get_config disk)"
+    readarray -t _part_list < <(lsblk "${_disk}" -l -n -o TYPE,NAME | awk '{if ($1=="part"){print "/dev/"$2}}' | grep -vx "$(_get_config "part_main")")
+    (( ${#_part_list[@]} < 1)) && {
+        _msg_error "The partition for EFI was not found."
+        _msg_error "The selected disk has less than two partitions."
+        exit 1
+    }
+    for _part in "${_part_list[@]}"; do
+        _choices+=("${_part} : $(lsblk -l -n -o SIZE "${_part}" | sed "s/ *//g")")
+    done
+    _answer="$(ask_question -n -p "Please select the partition to use as EFI partition" "${_choices[@]}")"
+    _selected="${_part_list[$(( _answer - 1 ))]}"
+    _add_config "part_main" "${_selected}"
+}
+
+_run _select_layout
+_run _select_disk
+_run _select_part
+_run _select_efi_part
+
