@@ -13,8 +13,8 @@ install_config=()
 ######################################################################################
 # _msg_common [-n] <label color> <label> <str1> <str2> ...
 _msg_common(){
-    [[ "${msgdebug}" = true  ]] && set -xv
-    [[ "${msgdebug}" = false ]] && set +xv
+    #[[ "${msgdebug}" = true  ]] && set -xv
+    #[[ "${msgdebug}" = false ]] && set +xv
     local _msg_opts=("-e") _count _message
     ! [[ "${1}" = "while" ]] && _color="${1}" && shift 1
     [[ "${1}" = "-n" ]] && _msg_opts+=("-n") && shift 1
@@ -22,8 +22,8 @@ _msg_common(){
     for _count in $(seq "1" "$(echo -ne "${_message}\n" | wc -l)"); do
         echo "${_msg_opts[@]}" "   $(echo -e "${_message}" | head -n "${_count}" | tail -n 1 )"
     done
-    [[ "${bash_debug}" = true  ]] && set -xv
-    [[ "${bash_debug}" = false ]] && set +xv
+    #[[ "${bash_debug}" = true  ]] && set -xv
+    #[[ "${bash_debug}" = false ]] && set +xv
     return 0
 }
 
@@ -229,118 +229,190 @@ _select_disk(){
     _add_config "disk" "${_selected}"
 }
 
-_edit_disk(){
-    case "$(ask_question -n -p "Do you want to edit partition?" "Yes" "No")" in
-        "1")
-            cfdisk "$(_get_config disk)"
-            ;;
-        "2")
-            echo
-            _msg "Make sure the partition is already configured for the new system"
-            case "$(ask_question -n "Yes" "No")" in
-                "1")
-                    return 0
-                    ;;
-                *) 
-                    echo
-                    _run _select_disk
-                    ;;
-            esac
-            ;;
-    esac
-}
+# _edit_disk(){
+#     case "$(ask_question -n -p "Do you want to edit partition?" "Yes" "No")" in
+#         "1")
+#             cfdisk "$(_get_config disk)"
+#             ;;
+#         "2")
+#             echo
+#             _msg "Make sure the partition is already configured for the new system"
+#             case "$(ask_question -n "Yes" "No")" in
+#                 "1")
+#                     return 0
+#                     ;;
+#                 *) 
+#                     echo
+#                     _run _select_disk
+#                     ;;
+#             esac
+#             ;;
+#     esac
+# }
 
-_select_part(){
-    local _part_list=() _choices=()
-    _msg "== Configure partition to install =="
+# _select_part(){
+#     local _part_list=() _choices=()
+#     _msg "== Configure partition to install =="
 
-    # Get partition list
-    readarray -t _part_list < <(
-        lsblk "$(_get_config disk)" -l -n -o TYPE,NAME | awk '{if ($1=="part"){print "/dev/"$2}}'
-    )
+#     # Get partition list
+#     readarray -t _part_list < <(
+#         lsblk "$(_get_config disk)" -l -n -o TYPE,NAME | awk '{if ($1=="part"){print "/dev/"$2}}'
+#     )
 
-    # Check partition 
-    (( ${#_part_list[@]} < 2)) && {
-        _msg_error "The selected disk has less than two partitions."
-        _msg_error "Requires two partitions, main and EFI"
-        exit 1
-    } || (( ${#_part_list[@]} = 2 )) && {
-        _msg_info "Two partitions were found on the selected disk."
-        _msg_info "Since the purpose of one partition has already been decided, initialize the other partition for EFI."
-    }
+#     # Check partition 
+#     (( ${#_part_list[@]} < 2)) && {
+#         _msg_error "The selected disk has less than two partitions."
+#         _msg_error "Requires two partitions, main and EFI"
+#         exit 1
+#     } || (( ${#_part_list[@]} == 2 )) && {
+#         _msg_info "Two partitions were found on the selected disk."
+#         _msg_info "Since the purpose of one partition has already been decided, initialize the other partition for EFI."
+#     }
 
-    # Create choices for ask_question
-    for _part in "${_part_list[@]}"; do
-        _choices+=("${_part} : $(lsblk -l -n -o SIZE "${_part}" | sed "s/ *//g")")
-    done
-    _choices+=("Edit disk partition")
+#     # Create choices for ask_question
+#     for _part in "${_part_list[@]}"; do
+#         _choices+=("${_part} : $(lsblk -l -n -o SIZE "${_part}" | sed "s/ *//g")")
+#     done
+#     _choices+=("Edit disk partition")
 
-    # Ask
-    _answer="$(ask_question -n -p "Please select the partition to install" "${_choices[@]}")"
+#     # Ask
+#     _answer="$(ask_question -n -p "Please select the partition to install" "${_choices[@]}")"
 
-    # Parse input
-    if (( "${_answer}" == "${#_choices[@]}" )); then
-        _run _edit_disk
-        return 0
-    fi
+#     # Parse input
+#     if (( "${_answer}" == "${#_choices[@]}" )); then
+#         _run _edit_disk
+#         return 0
+#     fi
 
-    _selected="${_part_list[$(( _answer - 1 ))]}"
-    _add_config "part_main" "${_selected}"
-}
+#     _selected="${_part_list[$(( _answer - 1 ))]}"
+#     _add_config "part_main" "${_selected}"
+# }
 
-_select_efi_part(){
-    local _part_list=() _choices=()
-    _msg "== Configure EFI partition to install =="
+# _select_efi_part(){
+#     local _part_list=() _choices=()
+#     _msg "== Configure EFI partition to install =="
 
-    # Get partition list
-    readarray -t _part_list < <(
-        lsblk "$(_get_config disk)" -l -n -o TYPE,NAME | \
-        awk '{if ($1=="part"){print "/dev/"$2}}' | \
-        grep -vx "$(_get_config "part_main")"
-    )
+#     # Get partition list
+#     readarray -t _part_list < <(
+#         lsblk "$(_get_config disk)" -l -n -o TYPE,NAME | \
+#         awk '{if ($1=="part"){print "/dev/"$2}}' | \
+#         grep -vx "$(_get_config "part_main")"
+#     )
 
 
 
-    # Create choices for ask_question
-    for _part in "${_part_list[@]}"; do
-        _choices+=("${_part} : $(lsblk -l -n -o SIZE "${_part}" | sed "s/ *//g")")
-    done
+#     # Create choices for ask_question
+#     for _part in "${_part_list[@]}"; do
+#         _choices+=("${_part} : $(lsblk -l -n -o SIZE "${_part}" | sed "s/ *//g")")
+#     done
 
-    # Ask
-    _answer="$(ask_question -n -p "Please select the partition to use as EFI partition" "${_choices[@]}")"
-    _selected="${_part_list[$(( _answer - 1 ))]}"
-    _add_config "part_efi" "${_selected}"
-}
+#     # Ask
+#     _answer="$(ask_question -n -p "Please select the partition to use as EFI partition" "${_choices[@]}")"
+#     _selected="${_part_list[$(( _answer - 1 ))]}"
+#     _add_config "part_efi" "${_selected}"
+# }
 
 _ask_username(){
-    local _answer
+    local _answer _ask
     _msg "== Configure user name =="
 
-    _msg "Please enter user name"
-    read -r -p "   > " _answer
+    _ask(){
+        _msg "Please enter user name"
+        read -r -p "   > " _answer
+        [[ ! "${_answer=""}" = "" ]] || {
+            _msg_error "Please enter user name"
+            _ask
+            return 0
+        }
+    }
+    _ask
+    
     _answer="$(echo -n "${_answer}" | sed 's/ //g' | tr '[:upper:]' '[:lower:]')"
     _add_config "username" "${_answer}"
+}
+
+
+_ask_hostname(){
+    local _answer _ask
+    _msg "== Configure host name =="
+
+    _ask(){
+        _msg "Please enter host name"
+        read -r -p "   > " _answer
+        [[ ! "${_answer=""}" = "" ]] || {
+            _msg_error "Please enter user name"
+            _ask
+            return 0
+        }
+        (( "${#_answer}" > 63 )) && {
+            _msg_error "The number of characters must be 63 characters or less."
+            _ask
+            return 0
+        }
+
+        # shellcheck disable=SC2001
+        [[ -n "$(sed -e "s/[0-9a-zA-Z-]*//g" <<< "${_answer}")" ]] && {
+            _msg_error "Only numbers, alphabets and hyphens can be used."
+            _ask
+            return 0
+        }
+
+        { grep -qE "^-" <<< "${_answer}" || grep -qE -- "-$" <<< "${_answer}"; } && {
+            _msg_error "You cannot use hyphens at the beginning or end."
+            _ask
+            return 0
+        }
+        return 0
+    }
+
+    _ask
+    _add_config "hostname" "${_answer}"
+
 
 }
 
 _ask_user_password(){
-    local _answer
+    local _ask _answer
     _msg "== Configure password =="
 
-    _msg "Please enter user password"
-    read -r -p "   > " _answer
-    
+    _ask(){
+        local _answer1 _answer2
+        _msg "Please enter user password"
+        read -r -s -p "   > " _answer1
 
+        _msg "\nPlease enter again"
+        read -r -s -p "   > " _answer2
 
+        { [[ ! "${_answer1}" = "${_answer2}" ]] || [[ -n "${_answer1-""}${_answer2-""}" ]]; } || {
+            _msg_error "The passwords do not match."
+            _ask
+            return 0
+        }
+
+        _answer="${_answer1}"
+        return 0
+    }
+    _ask
+    _msg_info "\nThe same password will be set as root one"
+    _add_config "user_password" "${_answer}"
 }
 
+_install_create_partition_auto(){
+    _msg_info "Configure partition ..."
+
+    parted --script "$(_get_config "disk")" \
+        mklabel gpt \
+        mkpart EFI fat32 START 256MB \
+        mkpart Linux ext4 256MB -4GB \
+        mkpart Swap linux-swap -4GB END
+}
 
 
 _configure_disk(){
     _run _select_disk
-    _run _edit_disk
-    _run _select_part
-    _run _select_efi_part
+    #_run _edit_disk
+    #_run _select_part
+    #_run _select_efi_part
 }
 
 _configure_locale(){
@@ -350,10 +422,14 @@ _configure_locale(){
 
 _configure_profile(){
     #_run _ask_fullname
-    _run _ask_username
     _run _ask_hostname
+    _run _ask_username
     _run _ask_user_password
     #_run _ask_root_password
+}
+
+_run_install(){
+    _run _install_create_partition
 }
 
 _check_environment
