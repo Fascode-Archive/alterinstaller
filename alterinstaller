@@ -15,12 +15,12 @@ install_config=()
 _msg_common(){
     [[ "${msgdebug}" = true  ]] && set -xv
     [[ "${msgdebug}" = false ]] && set +xv
-    local _msg_opts=("-e") _count _message _label
-    _label="$(_colored_text -nc "${1}" "${2}")" && shift 2
+    local _msg_opts=("-e") _count _message
+    ! [[ "${1}" = "while" ]] && _color="${1}" && shift 1
     [[ "${1}" = "-n" ]] && _msg_opts+=("-n") && shift 1
-    _message="$(_colored_text "${@}")"
+    _message="$(_colored_text -c "${_color}" "${@}")"
     for _count in $(seq "1" "$(echo -ne "${_message}\n" | wc -l)"); do
-        echo "${_msg_opts[@]}" "${_label} $(echo -e "${_message}" | head -n "${_count}" | tail -n 1 )"
+        echo "${_msg_opts[@]}" "   $(echo -e "${_message}" | head -n "${_count}" | tail -n 1 )"
     done
     [[ "${bash_debug}" = true  ]] && set -xv
     [[ "${bash_debug}" = false ]] && set +xv
@@ -29,19 +29,22 @@ _msg_common(){
 
 # Show an INFO message
 # $1: message string
-_msg_info() { _msg_common green "   Info" "${@}"; }
+_msg_info() { _msg_common green "${@}"; }
 
-# Show an Warning message
+# Show a Warning message
 # $1: message string
-_msg_warn() { _msg_common yellow "Warning" "${@}"; }
+_msg_warn() { _msg_common yellow "${@}"; }
 
-# Show an debug message
+# Show a debug message
 # $1: message string
-_msg_debug() { [[ "${debug}" = true ]] && _msg_common magenta "  Debug" "${@}"; return 0;}
+_msg_debug() { [[ "${debug}" = true ]] && _msg_common magenta "<Debug>" "${@}"; return 0;}
 
 # Show an ERROR message then exit with status
 # $1: message string
-_msg_error() { _msg_common red "  Error" "${@}"; }
+_msg_error() { _msg_common red "${@}"; }
+
+# Show a message without label
+_msg(){ _msg_common white "${@}"; }
 
 # 使い方
 # text [-b/-c color/-n/-f/-l/]
@@ -96,13 +99,13 @@ ask_question(){
     (( ${#_choice_list[@]} <= 1 )) && {
         [[ "${_number}" = true ]] && echo "1" || echo "${_choice_list[*]}" 
     } && return 0
-    [[ -n "${_question-""}" ]] && echo -e "${_question}" >&2
+    [[ -n "${_question-""}" ]] && echo "   ${_question}" >&2
     for (( _count=1; _count<=${#_choice_list[@]}; _count++)); do
         _choice="${_choice_list[$(( _count - 1 ))]}" _mark=" "
         { [[ ! "${_default}" = "" ]] && [[ "${_choice}" = "${_default}" ]]; } && _mark="*"
         printf " ${_mark} %${_digit}d: ${_choice}\n" "${_count}" >&2
     done
-    echo -n "(1 ~ ${#_choice_list[@]}) > " >&2 && read -r _input
+    echo -n "   (1 ~ ${#_choice_list[@]}) > " >&2 && read -r _input
     { [[ -z "${_input-""}" ]] && [[ -n "${_default-""}" ]]; } && {
         [[ "${_number}" = true ]] && echo 0 || echo "${_default}"
     } && return 0
@@ -118,6 +121,7 @@ ask_question(){
 }
 
 _add_config(){
+    _msg_debug "${1}=${2}"
     install_config+=("${1}=${2}")
 }
 _get_config(){ 
@@ -131,11 +135,25 @@ _run(){
     echo
 }
 
+_check_environment(){
+    # Check root
+    (( UID == 0 )) || {
+        _msg_error "Please run this installer as root"
+        exit 1
+    }
+}
+
+_first_message(){
+    _msg_warn "This installer is a simplified version."
+    _msg_warn "Complex configurations such as dual boot are not supported."
+    _msg_warn "Also, only EFI boot with Grub is supported. Legacy BIOS is not supported. "
+}
+
 _select_layout(){
     local _layout_list _selected="jp106" _answer _ask
     readarray -t _layout_list < <(localectl list-keymaps)
 
-    echo "== Configure keyboard map =="
+    _msg "== Configure keyboard map =="
 
     _ask(){
         _answer="$(ask_question -n -d "${_selected}" -p "Please select or enter layout from list" \
@@ -150,7 +168,9 @@ _select_layout(){
                 ;;
             "3")
                 read -r -p "(Layout) > " _answer
-                printf "%s\n" "${_layout_list[@]}" | grep -qx "${_answer}" && _selected="${_answer}"
+                printf "%s\n" "${_layout_list[@]}" | grep -qx "${_answer}" && _selected="${_answer}" && {
+                    _msg_info "echo ${_answer} is selected"
+                }
                 ;;
         esac
         echo
@@ -162,8 +182,41 @@ _select_layout(){
     _add_config "keyboard" "${_selected}"
 }
 
+_select_locale(){
+    local _locale_list _selected="ja_JP" _answer _ask
+    readarray -t _locale_list < <(find /usr/share/i18n/locales -printf "%f\n")
+
+    _msg "== Configure locale =="
+
+    _ask(){
+        _answer="$(ask_question -n -d "${_selected}" -p "Please select or enter locale from list" \
+            "Continue with current locale(${_selected})" "Show locale list" "Enter locale")"
+    
+        case "${_answer}" in
+            "1")
+                return 0
+                ;;
+            "2")
+                printf "%s\n" "${_locale_list[@]}" | less
+                ;;
+            "3")
+                read -r -p "(Layout) > " _answer
+                printf "%s\n" "${_locale_list[@]}" | grep -qx "${_answer}" && _selected="${_answer}" && {
+                    _msg_info "${_answer} is selected"
+                }
+                ;;
+        esac
+        echo
+        _ask
+        return 0
+    }
+
+    _ask
+    _add_config "locale" "${_selected}"
+}
+
 _select_disk(){
-    echo "== Configure disk to install =="
+    _msg "== Configure disk to install =="
 
     local _disk_list _choices _disk _answer _selected
     readarray -t _disk_list < <(lsblk -l -n -o TYPE,NAME | awk '{if ($1=="disk"){print "/dev/"$2}}')
@@ -171,7 +224,7 @@ _select_disk(){
         _choices+=("${_disk} : $(lsblk "${_disk}" -l -n -o MODEL | grep -Evx "^$") $(lsblk "${_disk}" -l -n -o TYPE,NAME | awk '{if ($1=="part"){print "/dev/"$2}}' | wc -l) Partition")
     done
 
-    _answer="$(ask_question -n -p "Please select the disk to install" "${_choices[@]}")"
+    _answer="$(ask_question -n -p "Please select the disk to install\nThe selected disc will be fully initialized" "${_choices[@]}")"
     _selected="${_disk_list[$(( _answer - 1 ))]}"
     _add_config "disk" "${_selected}"
 }
@@ -182,47 +235,131 @@ _edit_disk(){
             cfdisk "$(_get_config disk)"
             ;;
         "2")
-            echo "Make sure the partition is already configured for the new system"
-            return 0
+            echo
+            _msg "Make sure the partition is already configured for the new system"
+            case "$(ask_question -n "Yes" "No")" in
+                "1")
+                    return 0
+                    ;;
+                *) 
+                    echo
+                    _run _select_disk
+                    ;;
+            esac
             ;;
     esac
 }
 
 _select_part(){
-    echo "== Configure partition to install =="
+    local _part_list=() _choices=()
+    _msg "== Configure partition to install =="
 
-    local _part_list=() _disk _choices=()
-    _disk="$(_get_config disk)"
-    readarray -t _part_list < <(lsblk "${_disk}" -l -n -o TYPE,NAME | awk '{if ($1=="part"){print "/dev/"$2}}')
+    # Get partition list
+    readarray -t _part_list < <(
+        lsblk "$(_get_config disk)" -l -n -o TYPE,NAME | awk '{if ($1=="part"){print "/dev/"$2}}'
+    )
+
+    # Check partition 
+    (( ${#_part_list[@]} < 2)) && {
+        _msg_error "The selected disk has less than two partitions."
+        _msg_error "Requires two partitions, main and EFI"
+        exit 1
+    } || (( ${#_part_list[@]} = 2 )) && {
+        _msg_info "Two partitions were found on the selected disk."
+        _msg_info "Since the purpose of one partition has already been decided, initialize the other partition for EFI."
+    }
+
+    # Create choices for ask_question
     for _part in "${_part_list[@]}"; do
         _choices+=("${_part} : $(lsblk -l -n -o SIZE "${_part}" | sed "s/ *//g")")
     done
+    _choices+=("Edit disk partition")
+
+    # Ask
     _answer="$(ask_question -n -p "Please select the partition to install" "${_choices[@]}")"
+
+    # Parse input
+    if (( "${_answer}" == "${#_choices[@]}" )); then
+        _run _edit_disk
+        return 0
+    fi
+
     _selected="${_part_list[$(( _answer - 1 ))]}"
     _add_config "part_main" "${_selected}"
 }
 
 _select_efi_part(){
-    echo "== Configure EFI partition to install =="
+    local _part_list=() _choices=()
+    _msg "== Configure EFI partition to install =="
 
-    local _part_list=() _disk _choices=()
-    _disk="$(_get_config disk)"
-    readarray -t _part_list < <(lsblk "${_disk}" -l -n -o TYPE,NAME | awk '{if ($1=="part"){print "/dev/"$2}}' | grep -vx "$(_get_config "part_main")")
-    (( ${#_part_list[@]} < 1)) && {
-        _msg_error "The partition for EFI was not found."
-        _msg_error "The selected disk has less than two partitions."
-        exit 1
-    }
+    # Get partition list
+    readarray -t _part_list < <(
+        lsblk "$(_get_config disk)" -l -n -o TYPE,NAME | \
+        awk '{if ($1=="part"){print "/dev/"$2}}' | \
+        grep -vx "$(_get_config "part_main")"
+    )
+
+
+
+    # Create choices for ask_question
     for _part in "${_part_list[@]}"; do
         _choices+=("${_part} : $(lsblk -l -n -o SIZE "${_part}" | sed "s/ *//g")")
     done
+
+    # Ask
     _answer="$(ask_question -n -p "Please select the partition to use as EFI partition" "${_choices[@]}")"
     _selected="${_part_list[$(( _answer - 1 ))]}"
-    _add_config "part_main" "${_selected}"
+    _add_config "part_efi" "${_selected}"
 }
 
-_run _select_layout
-_run _select_disk
-_run _select_part
-_run _select_efi_part
+_ask_username(){
+    local _answer
+    _msg "== Configure user name =="
+
+    _msg "Please enter user name"
+    read -r -p "   > " _answer
+    _answer="$(echo -n "${_answer}" | sed 's/ //g' | tr '[:upper:]' '[:lower:]')"
+    _add_config "username" "${_answer}"
+
+}
+
+_ask_user_password(){
+    local _answer
+    _msg "== Configure password =="
+
+    _msg "Please enter user password"
+    read -r -p "   > " _answer
+    
+
+
+}
+
+
+
+_configure_disk(){
+    _run _select_disk
+    _run _edit_disk
+    _run _select_part
+    _run _select_efi_part
+}
+
+_configure_locale(){
+    _run _select_layout
+    _run _select_locale
+}
+
+_configure_profile(){
+    #_run _ask_fullname
+    _run _ask_username
+    _run _ask_hostname
+    _run _ask_user_password
+    #_run _ask_root_password
+}
+
+_check_environment
+_run _first_message
+_configure_locale
+_configure_disk
+_configure_profile
+
 
