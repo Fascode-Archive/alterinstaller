@@ -471,13 +471,18 @@ _configure_profile(){
 }
 
 _run_install(){
-    _run _install_create_partition
+    _run _install_format
+    _run _install_mount
+    _run _install_unpack
 }
 
 _check_environment
 _run _first_message
+
 _configure_locale
 _configure_disk
 _configure_profile
+
+_run_install
 
 
