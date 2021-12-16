@@ -434,6 +434,7 @@ _install_mount(){
     _root="$(_get_config "part_main")"
 
     _msg_info "Mount ${_root} at ${installer_mountpoint}/main"
+    mkdir -p "${installer_mountpoint}/main"
     mount "${_root}" "${installer_mountpoint}/main"
     
     _msg_info "Mount ${_efi} at ${installer_mountpoint}/main/boot"
