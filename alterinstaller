@@ -420,7 +420,7 @@ _install_format(){
     local _efi _root
 
     _efi="$(_get_config "part_efi")"
-    _root "$(_get_config "part_main")"
+    _root="$(_get_config "part_main")"
 
     _msg_info "Create Ext4 filesystem on ${_root}"
     mkfs.ext4 "${_root}"
