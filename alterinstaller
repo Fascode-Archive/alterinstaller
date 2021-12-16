@@ -9,6 +9,9 @@ debug=false
 
 install_config=()
 
+archiso_bootmnt="/run/archiso/bootmnt"
+installer_mountpoint="/var/alterinstall"
+
 
 ######################################################################################
 # _msg_common [-n] <label color> <label> <str1> <str2> ...
@@ -141,6 +144,9 @@ _check_environment(){
         _msg_error "Please run this installer as root"
         exit 1
     }
+
+    # Create dir
+    mkdir -p "${installer_mountpoint}"
 }
 
 _first_message(){
@@ -229,88 +235,91 @@ _select_disk(){
     _add_config "disk" "${_selected}"
 }
 
-# _edit_disk(){
-#     case "$(ask_question -n -p "Do you want to edit partition?" "Yes" "No")" in
-#         "1")
-#             cfdisk "$(_get_config disk)"
-#             ;;
-#         "2")
-#             echo
-#             _msg "Make sure the partition is already configured for the new system"
-#             case "$(ask_question -n "Yes" "No")" in
-#                 "1")
-#                     return 0
-#                     ;;
-#                 *) 
-#                     echo
-#                     _run _select_disk
-#                     ;;
-#             esac
-#             ;;
-#     esac
-# }
+_edit_disk(){
+    _msg_warn "This installer does not edit the partition now"
+    _msg_warn "Manually select the partition after editing the partition."
 
-# _select_part(){
-#     local _part_list=() _choices=()
-#     _msg "== Configure partition to install =="
+    case "$(ask_question -n -p "Do you want to edit partition?" "Yes" "No")" in
+        "1")
+            cfdisk "$(_get_config disk)"
+            ;;
+        "2")
+            echo
+            _msg "Make sure the partition is already configured for the new system"
+            case "$(ask_question -n "Yes" "No")" in
+                "1")
+                    return 0
+                    ;;
+                *) 
+                    echo
+                    _run _select_disk
+                    ;;
+            esac
+            ;;
+    esac
+}
 
-#     # Get partition list
-#     readarray -t _part_list < <(
-#         lsblk "$(_get_config disk)" -l -n -o TYPE,NAME | awk '{if ($1=="part"){print "/dev/"$2}}'
-#     )
+_select_part(){
+    local _part_list=() _choices=()
+    _msg "== Configure partition to install =="
 
-#     # Check partition 
-#     (( ${#_part_list[@]} < 2)) && {
-#         _msg_error "The selected disk has less than two partitions."
-#         _msg_error "Requires two partitions, main and EFI"
-#         exit 1
-#     } || (( ${#_part_list[@]} == 2 )) && {
-#         _msg_info "Two partitions were found on the selected disk."
-#         _msg_info "Since the purpose of one partition has already been decided, initialize the other partition for EFI."
-#     }
+    # Get partition list
+    readarray -t _part_list < <(
+        lsblk "$(_get_config disk)" -l -n -o TYPE,NAME | awk '{if ($1=="part"){print "/dev/"$2}}'
+    )
 
-#     # Create choices for ask_question
-#     for _part in "${_part_list[@]}"; do
-#         _choices+=("${_part} : $(lsblk -l -n -o SIZE "${_part}" | sed "s/ *//g")")
-#     done
-#     _choices+=("Edit disk partition")
+    # Check partition 
+    (( ${#_part_list[@]} < 2)) && {
+        _msg_error "The selected disk has less than two partitions."
+        _msg_error "Requires two partitions, main and EFI"
+        exit 1
+    } || (( ${#_part_list[@]} == 2 )) && {
+        _msg_info "Two partitions were found on the selected disk."
+        _msg_info "Since the purpose of one partition has already been decided, initialize the other partition for EFI."
+    }
 
-#     # Ask
-#     _answer="$(ask_question -n -p "Please select the partition to install" "${_choices[@]}")"
+    # Create choices for ask_question
+    for _part in "${_part_list[@]}"; do
+        _choices+=("${_part} : $(lsblk -l -n -o SIZE "${_part}" | sed "s/ *//g")")
+    done
+    _choices+=("Edit disk partition")
 
-#     # Parse input
-#     if (( "${_answer}" == "${#_choices[@]}" )); then
-#         _run _edit_disk
-#         return 0
-#     fi
+    # Ask
+    _answer="$(ask_question -n -p "Please select the partition to install" "${_choices[@]}")"
 
-#     _selected="${_part_list[$(( _answer - 1 ))]}"
-#     _add_config "part_main" "${_selected}"
-# }
+    # Parse input
+    if (( "${_answer}" == "${#_choices[@]}" )); then
+        _run _edit_disk
+        return 0
+    fi
 
-# _select_efi_part(){
-#     local _part_list=() _choices=()
-#     _msg "== Configure EFI partition to install =="
+    _selected="${_part_list[$(( _answer - 1 ))]}"
+    _add_config "part_main" "${_selected}"
+}
 
-#     # Get partition list
-#     readarray -t _part_list < <(
-#         lsblk "$(_get_config disk)" -l -n -o TYPE,NAME | \
-#         awk '{if ($1=="part"){print "/dev/"$2}}' | \
-#         grep -vx "$(_get_config "part_main")"
-#     )
+_select_efi_part(){
+    local _part_list=() _choices=()
+    _msg "== Configure EFI partition to install =="
+
+    # Get partition list
+    readarray -t _part_list < <(
+        lsblk "$(_get_config disk)" -l -n -o TYPE,NAME | \
+        awk '{if ($1=="part"){print "/dev/"$2}}' | \
+        grep -vx "$(_get_config "part_main")"
+    )
 
 
 
-#     # Create choices for ask_question
-#     for _part in "${_part_list[@]}"; do
-#         _choices+=("${_part} : $(lsblk -l -n -o SIZE "${_part}" | sed "s/ *//g")")
-#     done
+    # Create choices for ask_question
+    for _part in "${_part_list[@]}"; do
+        _choices+=("${_part} : $(lsblk -l -n -o SIZE "${_part}" | sed "s/ *//g")")
+    done
 
-#     # Ask
-#     _answer="$(ask_question -n -p "Please select the partition to use as EFI partition" "${_choices[@]}")"
-#     _selected="${_part_list[$(( _answer - 1 ))]}"
-#     _add_config "part_efi" "${_selected}"
-# }
+    # Ask
+    _answer="$(ask_question -n -p "Please select the partition to use as EFI partition" "${_choices[@]}")"
+    _selected="${_part_list[$(( _answer - 1 ))]}"
+    _add_config "part_efi" "${_selected}"
+}
 
 _ask_username(){
     local _answer _ask
@@ -397,22 +406,55 @@ _ask_user_password(){
     _add_config "user_password" "${_answer}"
 }
 
-_install_create_partition_auto(){
-    _msg_info "Configure partition ..."
+# _install_create_partition_auto(){
+#     _msg_info "Configure partition ..."
 
-    parted --script "$(_get_config "disk")" \
-        mklabel gpt \
-        mkpart EFI fat32 START 256MB \
-        mkpart Linux ext4 256MB -4GB \
-        mkpart Swap linux-swap -4GB END
+#     parted --script "$(_get_config "disk")" \
+#         mklabel gpt \
+#         mkpart EFI fat32 START 256MB \
+#         mkpart Linux ext4 256MB -4GB \
+#         mkpart Swap linux-swap -4GB END
+# }
+
+_install_format(){
+    local _efi _root
+
+    _efi="$(_get_config "part_efi")"
+    _root "$(_get_config "part_main")"
+
+    _msg_info "Create Ext4 filesystem on ${_root}"
+    mkfs.ext4 "${_root}"
+
+    _msg_info "Create EFI filesystem on ${_efi}"
+    mkfs.vfat -F32 "${_efi}"
+}
+
+_install_mount(){
+    _efi="$(_get_config "part_efi")"
+    _root "$(_get_config "part_main")"
+
+    _msg_info "Mount ${_root} at ${installer_mountpoint}/main"
+    mount "${_root}" "${installer_mountpoint}/main"
+    
+    _msg_info "Mount ${_efi} at ${installer_mountpoint}/main/boot"
+    mkdir -p "${installer_mountpoint}/main/boot"
+    mount "${_efi}" "${installer_mountpoint}/main/boot"
+}
+
+_install_unpack(){
+    local _sfs
+
+    while read -r _sfs; do
+        unsquashfs -force -dest "${installer_mountpoint}/main" "${_sfs}"
+    done < <(find "${archiso_bootmnt}" -name '*.sfs')
 }
 
 
 _configure_disk(){
     _run _select_disk
-    #_run _edit_disk
-    #_run _select_part
-    #_run _select_efi_part
+    _run _edit_disk
+    _run _select_part
+    _run _select_efi_part
 }
 
 _configure_locale(){
