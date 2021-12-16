@@ -431,7 +431,7 @@ _install_format(){
 
 _install_mount(){
     _efi="$(_get_config "part_efi")"
-    _root "$(_get_config "part_main")"
+    _root="$(_get_config "part_main")"
 
     _msg_info "Mount ${_root} at ${installer_mountpoint}/main"
     mount "${_root}" "${installer_mountpoint}/main"
